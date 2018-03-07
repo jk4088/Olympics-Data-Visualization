@@ -1,0 +1,356 @@
+---
+title: "QMSS_5063 Assignment 1"
+author: "Joo Kim"
+date: "2/19/2018"
+output: 
+  keep_md: true
+  html_document
+---
+
+## Tasks 
+***
+
+```{r, echo = FALSE}
+setwd("/Users/jookim/Documents/GitHub/Kim_Joo/HW1")
+
+packages.used <- c("dplyr", "ggplot2", "ggthemes", "
+                   tidyr",  "rvest", "stringr", "Plotly", "DT", "ggalt")
+
+# check packages that need to be installed.
+packages.needed <- setdiff(packages.used, intersect(installed.packages()[,1], packages.used))
+
+# install additional packages
+if(length(packages.needed) > 0) {
+  install.packages(packages.needed, dependencies = TRUE, repos = 'http://cran.us.r-project.org')
+}
+
+
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(tidyr)
+library(rvest)
+library(stringr)
+library(plotly)
+library(DT)
+library(ggalt)
+```
+
+```{r, echo = FALSE}
+winter <- read.csv("winter.csv")
+dictionary <- read.csv("dictionary.csv")
+
+str(winter)
+str(dictionary)
+
+#Consolidating countries that competed under different names across the years
+winter$Country[winter$Country == "URS"] <- "RUS"
+winter$Country[winter$Country == "TCH"] <- "CZE"
+winter$Country[winter$Country == "EUA" | 
+                 winter$Country == "FRG" | 
+                 winter$Country == "GDR"] <- "GER"
+
+winter$Medal <- factor(winter$Medal, levels = c("Gold", "Silver", "Bronze"))
+
+#Change country to code to merge two documents
+winter2 <- rename(winter, Code = Country)
+winter2 <- winter2 %>% inner_join(dictionary, by = "Code")
+```
+
+### 1. Medal Counts over Time 
+***
+
+### Medal Data 
+
+I will start by looking at how many Olympics these countries have medaled in. 
+
+```{r, echo = FALSE}
+year_country <- winter2 %>% group_by(Code, Year) %>% tally %>% 
+  count(length(Year)) %>% arrange(desc(nn))
+
+ggplot(year_country, aes(x = reorder(Code, nn), y = nn)) + 
+  geom_bar(stat = "identity", fill = "lightgoldenrod3") + 
+  coord_flip() + 
+  theme_tufte() + 
+  labs(x = "Country", 
+       y = "Number of winter olympics", 
+       title = "Number of winter olympics that countries medaled in")
+```
+
+It looks like USA, Sweden, Norway, Finland, and Canada have participated in the most Winter Olympics. How about in terms of medals? How many countries have won the most medals and by what type?
+
+```{r, echo = FALSE}
+medal_type <- winter2 %>% group_by(Code, Medal) %>% 
+  tally %>% arrange(desc(n))
+
+gg <- ggplot(medal_type, aes(x = reorder(Code, n), y = n, fill = Medal)) 
+medals_type_country <- gg + geom_bar(stat = "identity") + 
+  coord_flip() + 
+  theme_tufte() + 
+  labs(x = "Country", y = "Total number of medals", 
+       title = "Types of medals won by each country") + 
+  scale_fill_manual(values = c("lightgoldenrod3", "gray92", "tan3"))
+medals_type_country
+```
+
+Although Russia did not participate in as many games as the five countries mentioned above, it has won the most medals. It pays off to come from a cold climate! Next I would like to look at the top 5 countries that have won the most medals according to the graph above - Russia, USA, Germany, Canada, and Norway - and understand their trajectories of medal winnings over time. 
+
+```{r, echo = FALSE}
+country_10 <- winter2 %>% group_by(Code, Year) %>% 
+  tally %>% filter(Code == "RUS" | Code == "USA" | Code == "GER" | Code == "CAN" |
+                     Code == "NOR")
+factor(country_10$Code, levels = 1:5, labels = c("RUS", "USA", "GER", "CAN",
+                                                  "NOR"))
+top_10 <- rename(country_10, Medals_won = n)
+ggplot(top_10, aes(x = Year, y = Medals_won, color = Code)) +
+  geom_line() + theme_tufte() +
+  scale_color_discrete(name = "Country") +
+  labs(x = "Year", y = "Number of medals", 
+       title = "Medals won over time for top 5 countries") 
+```
+
+All except Russia exhibit an upward trend in medal winnings—they win more medals in the later Olympics than earlier ones, most likely due to the fact that the Olympic games have steadily added more sports and disciplines, increasing opportunities to win medals. As we're dealing with discrete variables, the line graph doesn't illustrate this trajectory as well as perhaps a bubble graph. 
+
+```{r, echo = FALSE}
+ggplot(top_10, aes(x = Year, y = Medals_won, color = Code)) +
+  geom_point(aes(size = Medals_won)) + 
+  scale_color_discrete(name = "Country") +
+  scale_size_continuous(name = "Medals won", 
+                        breaks = c(1, 40, 90), 
+                        labels = c("1 <", "40 <", "90 <")) +
+  theme_tufte() +
+  labs(x = "Year", y = "Number of medals won", 
+       title = "Medals won over time for top 5 countries") 
+```
+
+A bubble graph gives a clearer picture of the number of medals that the countries won at each Olympics; it confirms what the line graph presented earlier, that even the top 5 current Winter Olympic champions won far fewer medals when the Winter Olympics first began. 
+
+
+### 2. Medal Counts adjusted by Population, GDP 
+***
+
+For this question, I would like to create three bar graphs faceted to compare the number of medals won unadjusted, number of medals won after adjusting for population, and number of medals won after adjusting for GDP. 
+
+In order to represent in bar graphs, I adjusted the scales of population and GDP by dividing them by 10000 and 1000, respectively. 
+
+```{r, echo = FALSE}
+medal_adjusted <- winter2 %>% 
+  group_by(Code, Population, GDP.per.Capita) %>% 
+  tally %>% 
+  summarize(Pop_adjusted = n / (Population/ 10000),
+            GDP_adjusted = n / (GDP.per.Capita / 1000),
+            Unadjusted = n)
+
+medal_adjusted[is.na(medal_adjusted)] <- 0
+
+medal_adjusted$Population <- NULL
+medal_adjusted2 <- medal_adjusted %>% 
+  gather(`Pop_adjusted`, `GDP_adjusted`, `Unadjusted`, 
+         key = "type", value = "medalcount")
+medal_adjusted2$type <- factor(medal_adjusted2$type, levels = c("Unadjusted", "Pop_adjusted", "GDP_adjusted"))
+
+ggplot(medal_adjusted2, aes(x = reorder(Code, medalcount), y = medalcount)) + 
+  geom_bar(stat = "identity", fill = "lightgoldenrod3") + 
+  theme_tufte() + 
+  facet_grid(.~ type, scales = "free") + 
+  coord_flip() +
+  labs(x = "Country", y = "Medal count", 
+       title = "Ranking medal count: \nunadjusted, GDP adjusted, population adjusted")
+```
+
+On one hand, comparing to the unadjusted graph on the left, we see that Liechtenstein is the hidden star of the Winter Olympics when their medal counts are adjusted by population. On the other hand, the USA, which has the most medals after Russia, doesn't fare well when the medal counts are adjusted by population and GDP.
+
+
+## 3. Host Country Advantage
+***
+
+To visualize whether or not hosting the Olympics gives the host country an advantage in the Olympic games, I created a dumbbell chart that compared the average number of medals won when hosting vs. when they are not hosting. 
+
+```{r, echo = FALSE}
+wiki_hosts <- read_html("https://en.wikipedia.org/wiki/Winter_Olympic_Games")
+hosts <- html_table(html_nodes(wiki_hosts, "table")[[5]], fill=TRUE)
+hosts <- hosts[-1,1:3]
+hosts$Country <- str_split_fixed(hosts$Host, n = 2, ",")[, 2]
+
+#isolate countries who have hosted 
+host_country <- winter2 %>% filter(winter2$Country == "France" | 
+                                     winter2$Country == "Switzerland" |
+                                     winter2$Country == "Norway" |
+                                     winter2$Country == "Italy" |
+                                     winter2$Country == "United States" |
+                                     winter2$Country == "Austria" |
+                                     winter2$Country == "Japan" |
+                                     winter2$Country == "Yugoslavia" |
+                                     winter2$Country == "Canada" |
+                                     winter2$Country == "Russia" |
+                                     winter2$Country == "South Korea" |
+                                     winter2$Country == "Germany")
+
+year_country_medals <- host_country %>% group_by(Country, Year) %>% tally
+hosts$Year <- as.integer(hosts$Year)
+host_country_df <- left_join(year_country_medals, hosts, by = "Year")
+
+host_country_df$Country.y <- trimws(host_country_df$Country.y) #resolving an issue with hosts data for further data wrangling 
+
+host_country_df2 <- host_country_df %>% 
+  mutate(host_yesno = ifelse(Country.x == Country.y, 1, 0))
+
+host_country_df3 <- host_country_df2 %>% group_by(Country.x, host_yesno) %>% 
+  mutate(total_medal = sum(n),
+         events_participated = sum(table(n))) %>% slice(1)
+
+host_country_df4 <- host_country_df3 %>% summarize(average = total_medal / events_participated)
+host_country_df4$host_yesno <- factor(host_country_df4$host_yesno, levels = 0:1, labels = c("No", "Yes"))
+host_country_df5 <- host_country_df4 %>% spread(key = host_yesno, value = average)
+as.data.frame(host_country_df5)
+
+ggplot(host_country_df5, aes(x = No, xend = Yes, y = reorder(Country.x, No))) +
+  geom_dumbbell(colour_x = "black", size_x = 2.5, 
+                colour_xend = "tan3", size_xend = 2.5,
+                show.legend = TRUE,
+                size = 1) +
+  geom_label(aes(x = 38, y = "Russia", label = "Not hosting"),
+            color = "black", size = 3) + 
+  geom_label(aes(x = 75, y = "Russia", label = "Hosting"),
+            color = "tan3", size = 3) +
+  theme_tufte() +
+  scale_x_continuous(limits = c(0, 80), breaks = c(10, 20, 30, 40, 50, 60, 70)) +
+  labs(x = "Medals",
+       y = "Country",
+       title = "Difference in average number of medals when hosting vs. not hosting") +
+  theme(panel.background=element_rect(fill="#f7f7f7"),
+              panel.grid.major.x = element_line(),
+              legend.position = "right")
+
+```
+
+All except two countries won more medals when hosting than not. Germany and Austria performed worse when hosting the Winter Olympics than when they were not hosting... interesting! 
+
+### 4. Country Success by sport/discipline/event
+***
+
+Next, I'd like to explore the sports that have won Team USA most medals! 
+
+```{r, echo = FALSE}
+USA <- winter2 %>% filter(Code == "USA") %>% group_by(Code, Sport)
+bar <- ggplot(USA) + 
+  geom_bar(aes(x = Sport, fill = Sport), show.legend = FALSE, width = 1) +
+  theme(aspect.ratio = 1) +
+  theme_tufte() + 
+  labs(x = NULL, y = NULL, 
+       title = "Comparison of medals won by sport by Team USA!")
+cols <- c("Skiing" = "red", "Bobsleigh" = "royalblue3", 
+          "Curling" = "gray", "Ice Hockey" = "yellow",
+          "Skating" = "darkgreen", "Luge" = "black") #Olympic colors
+
+pie_USA <- bar + coord_polar() + scale_fill_manual(values = cols)
+pie_USA
+```
+
+It looks like ice hockey and skating are the sports that give Team USA most medals. Curling and Luge have won us the least, not unexpectedly, as those sports are traditionally not Team USA's strong suit.  
+
+### 5. Most successful athletes
+***
+
+I'd like to look at the ratio of gender when exploring the most decorated Olympians to date. I also added country of origin to data to provide a clearer picture of where the most successful athletes hail from. 
+
+```{r, echo = FALSE}
+athletes <- winter2 %>% 
+  unite(Athlete_info, Athlete, Code, sep = ": ") %>%
+  group_by(Athlete_info, Gender) %>%
+  tally %>% filter(n > 6) %>%
+  arrange(desc(n))
+
+athletes_bar <- ggplot(athletes, aes(x = reorder(Athlete_info, n), y = n, fill = Gender)) + 
+  geom_bar(stat = "identity") +
+  theme_tufte() + 
+  coord_flip() + 
+  labs(x = "Athlete", y = "Medal count", 
+       title = "Most Decorated Olympians") +
+  scale_fill_manual(values = c("royalblue3", "red2"))
+
+athletes_bar
+```
+
+The two most decorated athletes are from Norway and male. The next three most successful athletes are female and hail from Italy, Russia, and Germany. 
+
+### 6. Make two plots interactive 
+***
+
+I decided to make interactive the bar graph that illustrates the number of medals won by type and the pie chart showing the USA medals by sport. They will benefit the most from the interactive features because they contain a lot information that aren't fully displayed in the graphs alone. 
+
+### Interactive stacked bar showing number of medals won by type 
+
+```{r, echo = FALSE}
+by_medal_type <- medal_type %>% spread(key = Medal, value = n)
+by_medal_type[is.na(by_medal_type)] <- 0
+by_medal_type$Total <- with(by_medal_type, Gold + Silver + Bronze)
+
+m3 <- list(l = 100, r = 100, b = 50, t = 50, pad = 10)
+
+plot_ly(by_medal_type, x = ~Bronze, y = ~reorder(Code, Total), 
+        type = 'bar', name = 'Bronze',
+        marker = list(color = 'tan')) %>%
+  add_trace(x = ~Silver, name = 'Silver', marker = list(color = 'lightgray')) %>% 
+  add_trace(x = ~Gold, name = 'Gold', marker = list(color = 'gold')) %>%
+  layout(autosize = T,
+         margin = m3,
+         title = 'Medals won by type',
+         yaxis = list(title = "Country", showticklabels = TRUE, tickangle = 45, 
+                      tickfont = list(size = 6)),
+         xaxis = list(title = "Number of medals"), barmode = 'stack')
+```
+
+### Interactive pie chart showing number of medals won by sport by Team USA
+
+```{r, echo = FALSE}
+m2 <- list(l = 50, r = 50, b = 50, t = 50, pad = 10)
+
+USA %>% tally %>% 
+  plot_ly(labels = ~Sport, values = ~n,
+          type = 'pie',
+          textposition = 'inside',
+          insidetextfont = list(color = cols),
+          textinfo = 'label',
+          hoverinfo = 'value+percent',
+          marker = list(colors = cols,
+                        line = list(color = '#FFFFFF', width = 1))) %>%
+  layout(margin = m2,
+         title = 'Comparison of medals won by sport by Team USA!',
+         xaxis = list(title = "", showgrid = FALSE, 
+                      zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(title = "", showgrid = FALSE, 
+                      zeroline = FALSE, showticklabels = FALSE))
+                          
+```
+
+
+### 7. Data Table 
+***
+
+Finally, I created an interactive data table that includes a search bar, sorting, and column filtres.
+
+```{r, echo = FALSE}
+Data_table <- winter2 %>% select(Year, Sport, Athlete, Medal, Code) %>%
+  rename(Country = Code)
+
+Data_table %>% 
+  datatable(rownames = FALSE,
+            filter = list(position = "top"),
+            options = list(language = list(sSearch = "Filter:")))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
